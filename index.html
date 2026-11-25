@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat App</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      height: 100vh;
+      height: 100dvh;
+      color: #1c1e21;
+    }
+
+    .hidden { display: none !important; }
+
+    /* Join screen */
+    #join-screen {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .join-card {
+      background: #fff;
+      padding: 28px;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 340px;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    }
+    .join-card h1 { font-size: 22px; margin-bottom: 6px; }
+    .join-card p { color: #65676b; font-size: 14px; margin-bottom: 16px; }
+    .join-card input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ccd0d5;
+      border-radius: 8px;
+      font-size: 16px;
+      margin-bottom: 12px;
+    }
+    .join-card button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      background: #2563eb;
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #setup-warning {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+
+    /* Chat screen */
+    #chat-screen {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    #header {
+      padding: 14px 16px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 600;
+    }
+    #online {
+      padding: 8px 16px;
+      background: #fff;
+      border-bottom: 1px solid #e4e6eb;
+      font-size: 13px;
+      color: #65676b;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+      overflow-wrap: anywhere;
+    }
+    .msg.mine {
+      align-self: flex-end;
+      background: #2563eb;
+      color: #fff;
+    }
+    .msg .name { font-size: 12px; font-weight: 600; margin-bottom: 2px; opacity: 0.8; }
+    .msg .time { font-size: 11px; opacity: 0.6; margin-top: 2px; text-align: right; }
+
+    #typing {
+      height: 22px;
+      padding: 0 16px;
+      font-size: 13px;
+      color: #65676b;
+      font-style: italic;
+    }
+    #form {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      background: #fff;
+      border-top: 1px solid #e4e6eb;
+    }
+    #input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #ccd0d5;
+      border-radius: 20px;
+      font-size: 16px;
+    }
+    #form button {
+      padding: 0 18px;
+      border: none;
+      border-radius: 20px;
+      background: #2563eb;
+      color: #fff;
+      font-size: 15px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Join screen -->
+  <div id="join-screen">
+    <form class="join-card" id="join-form">
+      <h1>Join the chat</h1>
+      <p>Pick a name to get started.</p>
+      <div id="setup-warning" class="hidden">
+        Firebase is not set up yet. Paste your config into the script at the bottom of this file first.
+      </div>
+      <input id="name-input" type="text" placeholder="Your name" maxlength="20" autocomplete="off" required>
+      <button type="submit">Join</button>
+    </form>
+  </div>
+
+  <!-- Chat screen -->
+  <div id="chat-screen" class="hidden">
+    <div id="header">Group Chat</div>
+    <div id="online">Online (0)</div>
+    <div id="messages"></div>
+    <div id="typing"></div>
+    <form id="form">
+      <input id="input" type="text" placeholder="Type a message..." maxlength="500" autocomplete="off">
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script>
+    // Firebase config (the Realtime Database only needs these two values)
+    const firebaseConfig = {
+      databaseURL: "https://chat-app-bde4e-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "chat-app-bde4e"
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const configured = !!firebaseConfig.databaseURL && !firebaseConfig.databaseURL.includes('PASTE');
+
+    let db = null;
+    if (configured) {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
+    } else {
+      $('setup-warning').classList.remove('hidden');
+    }
+
+    let myName = '';
+    let myId = '';
+    let typingTimer;
+
+    // Remember the last name used
+    try {
+      const saved = localStorage.getItem('chatName');
+      if (saved) $('name-input').value = saved;
+    } catch (e) {}
+
+    // Join
+    $('join-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!configured) return;
+
+      const name = $('name-input').value.trim().slice(0, 20);
+      if (!name) return;
+
+      myName = name;
+      try { localStorage.setItem('chatName', name); } catch (e) {}
+
+      myId = db.ref('online').push().key;
+
+      $('join-screen').classList.add('hidden');
+      $('chat-screen').classList.remove('hidden');
+      startChat();
+      $('input').focus();
+    });
+
+    function startChat() {
+      // Presence: add me to the online list, remove me when I disconnect
+      db.ref('.info/connected').on('value', (snap) => {
+        if (snap.val() !== true) return;
+        const ref = db.ref('online/' + myId);
+        ref.onDisconnect().remove();
+        ref.set(myName);
+      });
+
+      // Online list
+      db.ref('online').on('value', (snap) => {
+        const names = [];
+        snap.forEach((child) => { names.push(child.val()); });
+        $('online').textContent = 'Online (' + names.length + '): ' + names.join(', ');
+      });
+
+      // Messages: last 100, then new ones live
+      db.ref('messages').limitToLast(100).on('child_added', (snap) => {
+        addMessage(snap.val());
+      });
+
+      // Typing indicator
+      db.ref('typing/' + myId).onDisconnect().remove();
+      db.ref('typing').on('value', (snap) => {
+        const names = [];
+        snap.forEach((child) => {
+          if (child.key !== myId) names.push(child.val());
+        });
+        if (names.length === 0) $('typing').textContent = '';
+        else if (names.length === 1) $('typing').textContent = names[0] + ' is typing...';
+        else $('typing').textContent = 'Several people are typing...';
+      });
+    }
+
+    // Send a message
+    $('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = $('input').value.trim().slice(0, 500);
+      if (!text || !db) return;
+
+      db.ref('messages').push({
+        user: myName,
+        text: text,
+        time: firebase.database.ServerValue.TIMESTAMP
+      });
+
+      $('input').value = '';
+      stopTyping();
+    });
+
+    // Typing
+    $('input').addEventListener('input', () => {
+      if (!db) return;
+      db.ref('typing/' + myId).set(myName);
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(stopTyping, 1500);
+    });
+
+    function stopTyping() {
+      clearTimeout(typingTimer);
+      if (db && myId) db.ref('typing/' + myId).remove();
+    }
+
+    // Show a message on screen
+    function addMessage(msg) {
+      const mine = msg.user === myName;
+
+      const div = document.createElement('div');
+      div.className = 'msg' + (mine ? ' mine' : '');
+
+      if (!mine) {
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = msg.user;
+        div.appendChild(name);
+      }
+
+      const body = document.createElement('div');
+      body.textContent = msg.text;
+      div.appendChild(body);
+
+      const stamp = document.createElement('div');
+      stamp.className = 'time';
+      stamp.textContent = new Date(msg.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      div.appendChild(stamp);
+
+      $('messages').appendChild(div);
+      $('messages').scrollTop = $('messages').scrollHeight;
+    }
+  </script>
+</body>
+</html>
